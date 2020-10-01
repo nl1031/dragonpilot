@@ -3,12 +3,12 @@ const int SUBARU_MAX_STEER = 2047; // 1s
 // the real time limit is 1500/sec
 const int SUBARU_MAX_RT_DELTA = 940;          // max delta torque allowed for real time checks
 const uint32_t SUBARU_RT_INTERVAL = 250000;    // 250ms between real time checks
-const int SUBARU_MAX_RATE_UP = 50;
+const int SUBARU_MAX_RATE_UP = 60;
 const int SUBARU_MAX_RATE_DOWN = 70;
 const int SUBARU_DRIVER_TORQUE_ALLOWANCE = 60;
 const int SUBARU_DRIVER_TORQUE_FACTOR = 10;
 
-const AddrBus SUBARU_TX_MSGS[] = {{0x122, 0}, {0x164, 0}, {0x221, 0}, {0x322, 0}};
+const AddrBus SUBARU_TX_MSGS[] = {{0x122, 0}, {0x161, 0}, {0x164, 0}, {0x221, 0}, {0x322, 0}};
 
 // TODO: do checksum and counter checks after adding the signals to the outback dbc file
 AddrCheckStruct subaru_rx_checks[] = {
@@ -141,7 +141,7 @@ static int subaru_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
       // 545 is ES_Distance
       // 802 is ES_LKAS
       int addr = GET_ADDR(to_fwd);
-      int block_msg = (addr == 290) || (addr == 356) || (addr == 545) || (addr == 802);
+      int block_msg = (addr == 290) || (addr == 353) || (addr == 356) || (addr == 545) || (addr == 802);
       if (!block_msg) {
         bus_fwd = 0;  // Main CAN
       }

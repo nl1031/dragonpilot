@@ -8,6 +8,10 @@ def subaru_checksum(packer, values, addr):
   dat = packer.make_can_msg(addr, 0, values)[2]
   return (sum(dat[1:]) + (addr >> 8) + addr) & 0xff
 
+def subaru_preglobal_checksum(packer, values, addr):
+  dat = packer.make_can_msg(addr, 0, values)[2]
+  return (sum(dat[:7])) % 256
+
 def create_steering_control(packer, car_fingerprint, apply_steer, frame, steer_step):
 
   if car_fingerprint == CAR.IMPREZA:
@@ -22,15 +26,18 @@ def create_steering_control(packer, car_fingerprint, apply_steer, frame, steer_s
     }
     values["Checksum"] = subaru_checksum(packer, values, 0x122)
 
+  if car_fingerprint in (CAR.OUTBACK, CAR.LEGACY, CAR.FORESTER):
+    #counts from 0 to 7 then back to 0
+    idx = (frame / steer_step) % 8
+
+    values = {
+      "Counter": idx,
+      "LKAS_Command": apply_steer,
+      "LKAS_Active": 1 if apply_steer != 0 else 0
+    }
+    values["Checksum"] = subaru_preglobal_checksum(packer, values, "ES_LKAS")
+
   return packer.make_can_msg("ES_LKAS", 0, values)
-
-def create_steering_status(packer, car_fingerprint, apply_steer, frame, steer_step):
-
-  if car_fingerprint == CAR.IMPREZA:
-    values = {}
-    values["Checksum"] = subaru_checksum(packer, {}, 0x322)
-
-  return packer.make_can_msg("ES_LKAS_State", 0, values)
 
 def create_es_distance(packer, es_distance_msg, pcm_cancel_cmd):
 
@@ -54,3 +61,13 @@ def create_es_lkas(packer, es_lkas_msg, visual_alert, left_line, right_line):
   values["Checksum"] = subaru_checksum(packer, values, 802)
 
   return packer.make_can_msg("ES_LKAS_State", 0, values)
+
+def create_es_throttle_control(packer, fake_button, es_accel_msg):
+
+  values = copy.copy(es_accel_msg)
+  values["Button"] = fake_button
+
+  values["Checksum"] = subaru_preglobal_checksum(packer, values, "ES_CruiseThrottle")
+
+  return packer.make_can_msg("ES_CruiseThrottle", 0, values)
+  

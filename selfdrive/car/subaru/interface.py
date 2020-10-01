@@ -7,10 +7,6 @@ from selfdrive.car.subaru.values import CAR
 from selfdrive.car.subaru.carstate import CarState, get_powertrain_can_parser, get_camera_can_parser
 from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness, gen_empty_fingerprint
 from selfdrive.car.interfaces import CarInterfaceBase
-from common.realtime import sec_since_boot
-from common.params import Params
-params = Params()
-from selfdrive.dragonpilot.dragonconf import dp_get_last_modified
 
 ButtonType = car.CarState.ButtonEvent.Type
 
@@ -33,14 +29,6 @@ class CarInterface(CarInterfaceBase):
     self.CC = None
     if CarController is not None:
       self.CC = CarController(CP.carFingerprint)
-
-    # dragonpilot
-    self.frame = 0
-    self.dragon_enable_steering_on_signal = False
-    self.dragon_allow_gas = False
-    self.ts_last_check = 0.
-    self.dragon_lat_ctrl = True
-    self.dp_last_modified = None
 
   @staticmethod
   def compute_gb(accel, speed):
@@ -77,9 +65,32 @@ class CarInterface(CarInterfaceBase):
       ret.steerMaxBP = [0.] # m/s
       ret.steerMaxV = [1.]
 
+    if candidate in [CAR.OUTBACK, CAR.FORESTER]:
+      ret.mass = 1568 + STD_CARGO_KG
+      ret.wheelbase = 2.67
+      ret.centerToFront = ret.wheelbase * 0.5
+      ret.steerRatio = 20           # learned, 14 stock
+      ret.steerActuatorDelay = 0.1
+      ret.lateralTuning.pid.kf = 0.000039
+      ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0., 10., 20.], [0., 10., 20.]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.01, 0.05, 0.2], [0.003, 0.018, 0.025]]
+      ret.steerMaxBP = [0.] # m/s
+      ret.steerMaxV = [1.]
+
+    if candidate in [CAR.LEGACY]:
+      ret.mass = 1568 + STD_CARGO_KG
+      ret.wheelbase = 2.67
+      ret.centerToFront = ret.wheelbase * 0.5
+      ret.steerRatio = 12.5   #14.5 stock
+      ret.steerActuatorDelay = 0.15
+      ret.lateralTuning.pid.kf = 0.00005
+      ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0., 20.], [0., 20.]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.1, 0.2], [0.01, 0.02]]
+      ret.steerMaxBP = [0.] # m/s
+      ret.steerMaxV = [1.]
+
     ret.steerControlType = car.CarParams.SteerControlType.torque
     ret.steerRatioRear = 0.
-    # testing tuning
 
     # No long control in subaru
     ret.gasMaxBP = [0.]
@@ -107,17 +118,6 @@ class CarInterface(CarInterfaceBase):
 
   # returns a car.CarState
   def update(self, c, can_strings):
-    # dragonpilot, don't check for param too often as it's a kernel call
-    ts = sec_since_boot()
-    if ts - self.ts_last_check >= 5.:
-      modified = dp_get_last_modified()
-      if self.dp_last_modified != modified:
-        self.dragon_enable_steering_on_signal = True if params.get("DragonEnableSteeringOnSignal", encoding='utf8') == "1" else True
-        self.dragon_allow_gas = True if params.get("DragonAllowGas", encoding='utf8') == "1" else False
-        self.dragon_lat_ctrl = False if params.get("DragonLatCtrl", encoding='utf8') == "0" else True
-        self.dp_last_modified = modified
-      self.ts_last_check = ts
-
     self.pt_cp.update_strings(can_strings)
     self.cam_cp.update_strings(can_strings)
 
@@ -183,30 +183,27 @@ class CarInterface(CarInterfaceBase):
 
 
     events = []
+    
+    if self.CS.steer_not_allowed:
+      events.append(create_event('steerUnavailable', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE, ET.PERMANENT]))
+      
     if ret.seatbeltUnlatched:
       events.append(create_event('seatbeltNotLatched', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
 
     if ret.doorOpen:
       events.append(create_event('doorOpen', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
 
-    if not self.dragon_lat_ctrl:
-      events.append(create_event('manualSteeringRequired', [ET.WARNING]))
-    elif (self.CS.left_blinker_on or self.CS.right_blinker_on) and self.dragon_enable_steering_on_signal:
-      events.append(create_event('manualSteeringRequiredBlinkersOn', [ET.WARNING]))
-
     if self.CS.acc_active and not self.acc_active_prev:
       events.append(create_event('pcmEnable', [ET.ENABLE]))
     if not self.CS.acc_active:
       events.append(create_event('pcmDisable', [ET.USER_DISABLE]))
 
-    # DragonAllowGas
-    if not self.dragon_allow_gas:
-      # disable on gas pedal rising edge
-      if (ret.gasPressed and not self.gas_pressed_prev):
-        events.append(create_event('pedalPressed', [ET.NO_ENTRY, ET.USER_DISABLE]))
+    # disable on gas pedal rising edge
+    if (ret.gasPressed and not self.gas_pressed_prev):
+      events.append(create_event('pedalPressed', [ET.NO_ENTRY, ET.USER_DISABLE]))
 
-      if ret.gasPressed:
-        events.append(create_event('pedalPressed', [ET.PRE_ENABLE]))
+    if ret.gasPressed:
+      events.append(create_event('pedalPressed', [ET.PRE_ENABLE]))
 
     ret.events = events
 
